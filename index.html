@@ -5,100 +5,156 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>散らし柄タイルメーカー</title>
 <style>
-  :root { --bg:#faf8f5; --card:#fff; --ink:#2b2622; --sub:#7a716a; --line:#e6e0d8; --accent:#e8862a; }
+  :root { --bg:#f3f1ee; --panel:#fff; --card:#faf8f5; --ink:#2b2622; --sub:#7a716a; --line:#e3ddd5; --accent:#e8862a;
+          --c0:#e8862a; --c1:#4c9a52; --c2:#8a5cc8; --canvas:#e9e6e1; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#1e1b19; --card:#2a2623; --ink:#f1ebe4; --sub:#a39a91; --line:#3d3733; --accent:#f0993f; }
+    :root { --bg:#161413; --panel:#221f1d; --card:#2a2623; --ink:#f1ebe4; --sub:#a39a91; --line:#3a3532; --accent:#f0993f;
+            --c0:#f0993f; --c1:#6fbf76; --c2:#b08ae6; --canvas:#181614; }
   }
   * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui,"Hiragino Sans","Yu Gothic UI",sans-serif; }
-  header { padding:14px 24px 0; }
-  h1 { margin:0; font-size:18px; }
-  header p { margin:2px 0 0; color:var(--sub); font-size:12px; }
-  main { display:grid; grid-template-columns:360px 1fr; gap:20px; padding:14px 24px 24px; align-items:start; }
-  @media (max-width:860px) { main { grid-template-columns:1fr; } #stage { position:static !important; } }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; }
-  .card + .card { margin-top:14px; }
-  h2 { margin:0 0 8px; font-size:14px; }
-  .tier { border:1px solid var(--line); border-radius:10px; padding:10px; margin-bottom:10px; }
-  .tier:last-child { margin-bottom:0; }
-  .tier h3 { margin:0; font-size:13px; display:flex; justify-content:space-between; align-items:baseline; }
-  .tier h3 small { color:var(--sub); font-weight:400; font-size:11px; }
-  .cnt { font-size:11px; color:var(--sub); margin-top:2px; }
-  .drop { margin-top:6px; border:2px dashed var(--line); border-radius:8px; padding:10px 8px; text-align:center; color:var(--sub); cursor:pointer; font-size:12px; }
-  .drop.over { border-color:var(--accent); color:var(--accent); }
-  .thumbs { display:grid; grid-template-columns:repeat(auto-fill,minmax(46px,1fr)); gap:5px; margin-top:6px; }
-  .th { position:relative; aspect-ratio:1; border:1px solid var(--line); border-radius:7px; background:#fff; display:flex; align-items:center; justify-content:center; }
-  .th img { max-width:86%; max-height:86%; }
-  .th { cursor:pointer; user-select:none; }
+  html, body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:13px/1.45 system-ui,"Hiragino Sans","Yu Gothic UI",sans-serif; overflow:hidden; }
+  button, select, input { font-family:inherit; }
+  .sp { flex:1; }
+
+  /* ---- 全体レイアウト: 上バー / 左=素材 / 中央=キャンバス / 右=設定 (画面内に収め、各パネルは必要な時だけ内部スクロール) */
+  #app { display:grid; height:100vh; grid-template-rows:44px 1fr; grid-template-columns:310px 1fr 270px; }
+  #top { grid-column:1 / -1; display:flex; align-items:center; gap:8px; padding:0 12px; background:var(--panel); border-bottom:1px solid var(--line); }
+  #top h1 { margin:0 8px 0 0; font-size:14px; white-space:nowrap; }
+  #autosave { font-size:11px; color:var(--sub); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tb { padding:5px 11px; border:1px solid var(--line); border-radius:7px; background:var(--panel); color:var(--ink); cursor:pointer; font-size:12px; text-decoration:none; white-space:nowrap; }
+  .tb:hover:not(:disabled) { border-color:var(--accent); }
+  .tb.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  .tb:disabled { opacity:.5; cursor:wait; }
+  .sepv { width:1px; height:20px; background:var(--line); margin:0 4px; }
+
+  aside { background:var(--panel); overflow:auto; min-height:0; }
+  #left { border-right:1px solid var(--line); padding:8px; }
+  #right { border-left:1px solid var(--line); display:flex; flex-direction:column; }
+  #right .scroll { flex:1; overflow:auto; padding:10px 12px; }
+  #right .run { padding:10px 12px; border-top:1px solid var(--line); background:var(--panel); }
+
+  /* ---- 素材ゾーン */
+  .zone { border:1px solid var(--line); border-radius:9px; background:var(--card); margin-bottom:8px; overflow:hidden; }
+  .zone > header { display:flex; align-items:center; gap:6px; padding:6px 8px; }
+  .zone .zt { font-weight:600; font-size:12px; }
+  .zone .zh { color:var(--sub); font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .badge { min-width:20px; padding:0 6px; border-radius:999px; background:var(--line); font-size:10px; text-align:center; line-height:16px; }
+  .zone[data-tier="0"] { border-top:3px solid var(--c0); } .zone[data-tier="1"] { border-top:3px solid var(--c1); } .zone[data-tier="2"] { border-top:3px solid var(--c2); }
+  .zone.pool { border-style:dashed; }
+  .zone.over { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, var(--card)); }
+  .mini { padding:2px 8px; border:1px solid var(--line); border-radius:999px; background:var(--panel); color:var(--ink); cursor:pointer; font-size:10px; white-space:nowrap; }
+  .mini:hover { border-color:var(--accent); }
+  .thumbs { display:grid; grid-template-columns:repeat(auto-fill,minmax(40px,1fr)); gap:5px; padding:0 8px 8px; min-height:14px; }
+  .thumbs:empty { padding:2px 8px 10px; display:block; }
+  .thumbs:empty::before { content:attr(data-empty); color:var(--sub); font-size:11px; }
+  .th { position:relative; aspect-ratio:1; border:1px solid var(--line); border-radius:6px; background:#fff; display:flex; align-items:center; justify-content:center; cursor:pointer; user-select:none; }
+  .th img { max-width:84%; max-height:84%; pointer-events:none; }
   .th.sel { outline:3px solid var(--accent); outline-offset:1px; }
-  .tier.over { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 8%, transparent); }
-  .tier.pool { border-style:dashed; }
-  .acts { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
-  .acts button { padding:4px 9px; border:1px solid var(--line); border-radius:999px; background:var(--card); color:var(--ink); cursor:pointer; font-size:11px; font-family:inherit; }
-  .acts button:hover { border-color:var(--accent); }
-  .acts .lbl { width:100%; font-size:11px; color:var(--sub); }
-  .th button.back { right:auto; left:-6px; background:var(--accent); }
-  .th button { position:absolute; top:-6px; right:-6px; width:17px; height:17px; border-radius:50%; border:0; background:#555; color:#fff; font-size:10px; line-height:17px; padding:0; cursor:pointer; }
-  .row { display:grid; grid-template-columns:78px 1fr 52px; align-items:center; gap:8px; margin:6px 0; font-size:12px; }
-  .row output { text-align:right; color:var(--sub); font-variant-numeric:tabular-nums; }
+  .th button { position:absolute; top:-5px; right:-5px; width:15px; height:15px; border-radius:50%; border:0; background:#555; color:#fff; font-size:9px; line-height:15px; padding:0; cursor:pointer; display:none; }
+  .th button.back { right:auto; left:-5px; background:var(--accent); }
+  .th:hover button { display:block; }
+  .acts { display:flex; flex-wrap:wrap; gap:4px; padding:0 8px 8px; align-items:center; }
+  .acts .lbl { width:100%; font-size:10px; color:var(--sub); }
+  .acts .mini.c0 { border-color:var(--c0); } .acts .mini.c1 { border-color:var(--c1); } .acts .mini.c2 { border-color:var(--c2); }
+
+  /* ---- 設定 */
+  .grp { margin-bottom:14px; }
+  .grp h2 { margin:0 0 6px; font-size:11px; color:var(--sub); font-weight:600; letter-spacing:.04em; }
+  .rl { padding:6px 8px 4px; margin-bottom:6px; border:1px solid var(--line); border-radius:8px; background:var(--card); }
+  .rl .rn { font-weight:600; font-size:12px; display:flex; align-items:center; gap:6px; }
+  .rl i { width:9px; height:9px; border-radius:50%; display:inline-block; }
+  .row { display:grid; grid-template-columns:64px 1fr 46px; align-items:center; gap:6px; margin:5px 0; font-size:11px; }
+  .row label { color:var(--sub); }
+  .row output { text-align:right; color:var(--ink); font-variant-numeric:tabular-nums; }
   .row input[type=range] { width:100%; accent-color:var(--accent); }
-  select, input[type=number] { width:100%; padding:4px 6px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--ink); }
-  .btn { display:block; width:100%; padding:10px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-size:15px; font-weight:600; cursor:pointer; }
+  select, input[type=number] { width:100%; padding:3px 6px; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:var(--ink); font-size:12px; }
+  .btn { display:block; width:100%; padding:9px; border:0; border-radius:9px; background:var(--accent); color:#fff; font-size:14px; font-weight:600; cursor:pointer; }
   .btn:disabled { opacity:.5; cursor:wait; }
-  .btn.sec { background:var(--card); color:var(--ink); border:1px solid var(--line); font-weight:500; }
-  #status { margin-top:8px; font-size:12px; color:var(--sub); min-height:18px; }
-  #stage { position:sticky; top:14px; }
-  .bar { display:flex; gap:6px; margin-bottom:8px; flex-wrap:wrap; align-items:center; }
-  .bar button, .bar a { padding:5px 12px; border:1px solid var(--line); border-radius:999px; background:var(--card); color:var(--ink); cursor:pointer; font-size:12px; text-decoration:none; font-family:inherit; }
-  .bar button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
-  .bar .sp { flex:1; }
-  .bar a:hover, .bar button:hover { border-color:var(--accent); }
-  /* ステージ全体が画面内に収まるよう、高さ基準で正方形の大きさを決める */
-  #view { width:min(100%, calc(100vh - 150px)); aspect-ratio:1; margin:0 auto; border:1px solid var(--line); border-radius:8px; background:#fff no-repeat center / contain; display:flex; align-items:center; justify-content:center; color:var(--sub); font-size:13px; text-align:center; padding:12px; }
+  .btn.sec { background:var(--panel); color:var(--ink); border:1px solid var(--line); font-weight:500; font-size:12px; padding:6px; margin-top:6px; }
+  #status { margin-top:8px; font-size:11px; color:var(--sub); min-height:16px; line-height:1.4; }
+
+  /* ---- 中央キャンバス */
+  #center { background:var(--canvas); display:flex; flex-direction:column; min-width:0; min-height:0; }
+  .cbar { display:flex; align-items:center; gap:10px; padding:8px 12px; }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--panel); }
+  .seg button { padding:4px 12px; border:0; background:transparent; color:var(--ink); cursor:pointer; font-size:12px; }
+  .seg button.on { background:var(--accent); color:#fff; }
+  .cbar .hint { font-size:11px; color:var(--sub); }
+  #stage { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; padding:0 16px 16px; }
+  #view { height:100%; max-width:100%; aspect-ratio:1; border:1px solid var(--line); border-radius:6px; background:#fff no-repeat center / contain; box-shadow:0 2px 14px rgba(0,0,0,.12); display:flex; align-items:center; justify-content:center; color:var(--sub); font-size:13px; text-align:center; padding:12px; }
   #view.x3 { background-repeat:repeat; }
+
+  /* ---- 狭い画面: 縦に積んでページ全体をスクロール */
+  @media (max-width:1000px) {
+    body { overflow:auto; }
+    #app { display:block; height:auto; }
+    #top { flex-wrap:wrap; padding:8px 12px; }
+    aside { overflow:visible; }
+    #left, #right { border:0; }
+    #stage { padding:0 12px 12px; } #view { height:auto; width:100%; }
+    #right .run { position:sticky; bottom:0; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>散らし柄タイルメーカー</h1>
-  <p>役割ごとに素材を入れると、大きさに差をつけて、重ならず・上下左右がつながる散らし柄タイルを作ります。（すべてこのブラウザ内で処理。画像は外部に送信されません）</p>
-</header>
-<main>
-  <div>
-    <div class="card">
-      <h2>プロジェクト</h2>
-      <div class="acts" style="margin-top:0"><button id="prjSave">ファイルに保存</button><button id="prjLoad">ファイルを読み込み</button><button id="prjClear">素材をすべてクリア</button></div>
-      <input type="file" id="prjFile" accept=".json,application/json" hidden>
-      <div id="autosave" style="font-size:11px;color:var(--sub);margin-top:6px">素材・振り分け・設定は、このブラウザに自動で保存されます。別のPCへ移す・バックアップにはファイル保存を使ってください。</div>
+<div id="app">
+  <header id="top">
+    <h1>散らし柄タイルメーカー</h1>
+    <button class="tb" id="prjSave" title="画像・振り分け・設定を1つの .json にまとめて保存します">プロジェクト保存</button>
+    <button class="tb" id="prjLoad" title="保存した .json から復元します">開く</button>
+    <button class="tb" id="prjClear" title="素材をすべて消します（設定は残ります）">素材クリア</button>
+    <input type="file" id="prjFile" accept=".json,application/json" hidden>
+    <span class="sp"></span>
+    <span id="autosave">この端末内で処理・自動保存（画像は外部に送信されません）</span>
+    <span class="sepv"></span>
+    <a class="tb" id="dlPng" hidden download="tile.png">PNG保存</a>
+    <button class="tb primary" id="dlPptx" hidden>PPTX保存</button>
+  </header>
+
+  <aside id="left">
+    <div id="tiers"></div>
+  </aside>
+
+  <main id="center">
+    <div class="cbar">
+      <div class="seg"><button id="t1">1枚</button><button id="t3" class="on">3×3</button></div>
+      <span class="hint">3×3 で上下左右の継ぎ目を確認できます</span>
     </div>
-    <div class="card">
-      <h2>1. イラスト素材</h2>
-      <p style="margin:0 0 8px;font-size:11px;color:var(--sub)">まとめて「未振り分け」に入れ、画像をクリックで選択（複数可）→ボタン、またはドラッグで役割へ振り分けます。</p>
-      <div id="tiers"></div>
+    <div id="stage"><div id="view"><span id="empty">素材を入れて「タイルを作る」を押してください</span></div></div>
+  </main>
+
+  <aside id="right">
+    <div class="scroll">
+      <div class="grp">
+        <h2>全体</h2>
+        <div class="row"><label for="size" title="メインのイラストの大きさ（キャンバス幅に対する割合）">基準サイズ</label><input id="size" type="range" min="0.08" max="0.22" step="0.005" value="0.13"><output></output></div>
+        <div class="row"><label for="gap" title="イラスト同士の最低限の距離">すき間</label><input id="gap" type="range" min="0" max="0.06" step="0.005" value="0.02"><output></output></div>
+        <div class="row"><label for="rotate" title="ランダム回転の最大角度">傾き(±°)</label><input id="rotate" type="range" min="0" max="45" step="1" value="12"><output></output></div>
+        <div class="row"><label for="seed" title="配置パターンの番号。同じ番号なら同じ配置になります">シード</label><input id="seed" type="number" value="1" min="1"><span></span></div>
+        <div class="row"><label for="px">解像度</label>
+          <select id="px"><option value="2048">2048 px</option><option value="4096" selected>4096 px</option><option value="6000">6000 px</option></select><span></span></div>
+      </div>
+      <div class="grp">
+        <h2>役割ごと</h2>
+        <div class="rl"><div class="rn"><i style="background:var(--c0)"></i>メイン</div>
+          <div class="row"><label>使用回数</label><input type="range" id="rep0" min="1" max="6" step="1" value="1"><output></output></div>
+          <div class="row"><label>サイズ倍率</label><input type="range" id="scl0" min="0.2" max="1.4" step="0.02" value="1"><output></output></div></div>
+        <div class="rl"><div class="rn"><i style="background:var(--c1)"></i>サブ</div>
+          <div class="row"><label>使用回数</label><input type="range" id="rep1" min="1" max="6" step="1" value="1"><output></output></div>
+          <div class="row"><label>サイズ倍率</label><input type="range" id="scl1" min="0.2" max="1.4" step="0.02" value="0.62"><output></output></div></div>
+        <div class="rl"><div class="rn"><i style="background:var(--c2)"></i>アクセント</div>
+          <div class="row"><label>使用回数</label><input type="range" id="rep2" min="1" max="6" step="1" value="1"><output></output></div>
+          <div class="row"><label>サイズ倍率</label><input type="range" id="scl2" min="0.2" max="1.4" step="0.02" value="0.38"><output></output></div></div>
+      </div>
     </div>
-    <div class="card">
-      <h2>2. 設定</h2>
-      <div class="row"><label for="size">基準サイズ</label><input id="size" type="range" min="0.08" max="0.22" step="0.005" value="0.13"><output></output></div>
-      <div class="row"><label for="gap">すき間</label><input id="gap" type="range" min="0" max="0.06" step="0.005" value="0.02"><output></output></div>
-      <div class="row"><label for="rotate">傾き(±°)</label><input id="rotate" type="range" min="0" max="45" step="1" value="12"><output></output></div>
-      <div class="row"><label for="seed">シード</label><input id="seed" type="number" value="1" min="1"><span></span></div>
-      <div class="row"><label for="px">解像度</label>
-        <select id="px"><option value="2048">2048 px</option><option value="4096" selected>4096 px</option><option value="6000">6000 px</option></select><span></span></div>
+    <div class="run">
       <button id="go" class="btn">タイルを作る</button>
-      <button id="shuffle" class="btn sec" style="margin-top:8px">別のパターンで作る</button>
+      <button id="shuffle" class="btn sec">別のパターンで作る</button>
       <div id="status"></div>
     </div>
-  </div>
-  <div class="card" id="stage">
-    <div class="bar">
-      <button id="t1">1枚</button><button id="t3" class="on">3×3 で継ぎ目確認</button>
-      <span class="sp"></span>
-      <a id="dlPng" hidden download="tile.png">PNG保存</a>
-      <button id="dlPptx" hidden>PPTX保存</button>
-    </div>
-    <div id="view"><span id="empty">素材を入れて「タイルを作る」を押してください</span></div>
-  </div>
-</main>
+  </aside>
+</div>
 
 <script src="lib/pptxgen.bundle.js"></script>
 
@@ -329,26 +385,22 @@ const zoneId = t => 'th' + (t < 0 ? 'P' : t), cntId = t => 'cn' + (t < 0 ? 'P' :
 const wrap = $('tiers');
 
 function buildZone(t) {
-  const meta = t < 0 ? {name: '未振り分け', hint: 'まとめてここに入れる'} : TIERS[t];
-  const d = document.createElement('div'); d.className = 'tier' + (t < 0 ? ' pool' : '');
+  const meta = t < 0 ? {name: '未振り分け', hint: 'まとめてここへ'} : TIERS[t];
+  const d = document.createElement('section'); d.className = 'zone' + (t < 0 ? ' pool' : ''); d.dataset.tier = t;
   d.innerHTML = `
-    <h3>${meta.name}<small>${meta.hint}</small></h3>
-    <div class="cnt" id="${cntId(t)}">0枚</div>
-    <div class="drop">${t < 0 ? 'まとめてドロップ / クリックで追加' : 'ドロップ / クリックで追加'}</div>
-    <input type="file" accept="image/*" multiple hidden>
-    <div class="thumbs" id="${zoneId(t)}"></div>` + (t >= 0 ? `<div class="acts"><button data-back="${t}">この枠を全て未振り分けへ戻す</button></div>` : '') + (t < 0 ? `
+    <header><span class="zt">${meta.name}</span><span class="badge" id="${cntId(t)}">0</span><span class="zh">${meta.hint}</span><span class="sp"></span>
+      ${t < 0 ? '<button class="mini" data-add="1">＋ 追加</button>' : `<button class="mini" data-back="${t}" title="この枠を全て未振り分けへ戻す">↩ 全て戻す</button>`}</header>
+    <div class="thumbs" id="${zoneId(t)}" data-empty="${t < 0 ? 'ここに画像をドロップ（複数可）／ ＋追加' : 'ここにドロップ／下の選択ボタンで振り分け'}"></div>
+    <input type="file" accept="image/*,.svg" multiple hidden>` + (t < 0 ? `
     <div class="acts">
-      <span class="lbl">選択中: <b id="selCount">0</b>枚 → 移動先</span>
-      ${TIERS.map((x, i) => `<button data-to="${i}">${x.name}へ</button>`).join('')}
-      <button data-to="-1">未振り分けへ</button>
-      <button data-sel="pool">未振り分けを全選択</button>
-      <button data-sel="none">選択解除</button>
-    </div>` : `
-    <div class="row"><label>使用回数</label><input type="range" id="rep${t}" min="1" max="6" step="1" value="1"><output></output></div>
-    <div class="row"><label>サイズ倍率</label><input type="range" id="scl${t}" min="0.2" max="1.4" step="0.02" value="${meta.scale}"><output></output></div>`);
+      <span class="lbl">クリックで選択（複数可）→ 移動先　<b id="selCount">0</b>枚選択中</span>
+      ${TIERS.map((x, i) => `<button class="mini c${i}" data-to="${i}">${x.name}へ</button>`).join('')}
+      <button class="mini" data-to="-1">未振り分けへ</button>
+      <button class="mini" data-sel="pool">全選択</button><button class="mini" data-sel="none">解除</button>
+    </div>` : '');
   wrap.appendChild(d);
-  const drop = d.querySelector('.drop'), file = d.querySelector('input[type=file]');
-  drop.onclick = () => file.click();
+  const file = d.querySelector('input[type=file]');
+  const add = d.querySelector('[data-add]'); if (add) add.onclick = () => file.click();
   file.onchange = e => { addFiles(e.target.files, t); e.target.value = ''; };
   // 画像のドラッグ移動 / ファイルのドロップ追加 (枠全体が受け皿)
   d.addEventListener('dragover', e => { e.preventDefault(); d.classList.add('over'); });
@@ -358,7 +410,7 @@ function buildZone(t) {
     const own = e.dataTransfer.getData('text/x-scatter');
     if (own) moveImages(JSON.parse(own), t); else addFiles(e.dataTransfer.files, t);
   });
-  d.querySelectorAll('.acts button').forEach(btn => btn.onclick = () => {
+  d.querySelectorAll('button[data-back], .acts button').forEach(btn => btn.onclick = () => {
     if (btn.dataset.back != null) moveImages(images.filter(im => im.tier === t).map(im => im.id), -1);
     else if (btn.dataset.to != null) { if (selected.size) moveImages([...selected], +btn.dataset.to); }
     else { selected.clear(); if (btn.dataset.sel === 'pool') images.filter(im => im.tier < 0).forEach(im => selected.add(im.id)); renderThumbs(); }
@@ -381,7 +433,7 @@ function moveImages(ids, to) {
   selected.clear(); renderThumbs();
 }
 function renderThumbs() {
-  [-1, 0, 1, 2].forEach(t => { $(zoneId(t)).innerHTML = ''; $(cntId(t)).textContent = images.filter(m => m.tier === t).length + '枚'; });
+  [-1, 0, 1, 2].forEach(t => { $(zoneId(t)).innerHTML = ''; $(cntId(t)).textContent = images.filter(m => m.tier === t).length; });
   images.forEach(im => {
     const d = document.createElement('div'); d.className = 'th' + (selected.has(im.id) ? ' sel' : '');
     d.draggable = true; d.title = im.name;
