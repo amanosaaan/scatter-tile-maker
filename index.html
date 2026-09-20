@@ -18,7 +18,7 @@
   .sp { flex:1; }
 
   /* ---- 全体レイアウト: 上バー / 左=素材 / 中央=キャンバス / 右=設定 (画面内に収め、各パネルは必要な時だけ内部スクロール) */
-  #app { display:grid; height:100vh; grid-template-rows:44px 1fr; grid-template-columns:310px 1fr 270px; }
+  #app { display:grid; height:100vh; grid-template-rows:44px 1fr; grid-template-columns:300px 1fr 330px; }
   #top { grid-column:1 / -1; display:flex; align-items:center; gap:8px; padding:0 12px; background:var(--panel); border-bottom:1px solid var(--line); }
   #top h1 { margin:0 8px 0 0; font-size:14px; white-space:nowrap; }
   #autosave { font-size:11px; color:var(--sub); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -64,7 +64,16 @@
   .rl { padding:6px 8px 4px; margin-bottom:6px; border:1px solid var(--line); border-radius:8px; background:var(--card); }
   .rl .rn { font-weight:600; font-size:12px; display:flex; align-items:center; gap:6px; }
   .rl i { width:9px; height:9px; border-radius:50%; display:inline-block; }
-  .row { display:grid; grid-template-columns:64px 1fr 46px; align-items:center; gap:6px; margin:5px 0; font-size:11px; }
+  .row { display:grid; grid-template-columns:58px 20px 1fr 20px 44px; align-items:center; gap:5px; margin:5px 0; font-size:11px; }
+  .row.plain { grid-template-columns:58px 1fr; }
+  .stp { width:20px; height:20px; padding:0; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:var(--ink); cursor:pointer; font-size:13px; line-height:1; touch-action:manipulation; user-select:none; }
+  .stp:hover { border-color:var(--accent); } .stp:active { background:var(--accent); color:#fff; }
+  input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance:none; margin:0; }
+  input[type=number] { -moz-appearance:textfield; appearance:textfield; }
+  #upd { position:fixed; top:8px; left:50%; transform:translateX(-50%); z-index:10; background:var(--ink); color:var(--panel); padding:6px 8px 6px 14px; border-radius:999px; font-size:12px; display:flex; align-items:center; gap:8px; box-shadow:0 4px 18px rgba(0,0,0,.25); }
+  #upd[hidden] { display:none; }
+  #upd button { border:0; border-radius:999px; padding:3px 12px; background:var(--accent); color:#fff; cursor:pointer; font-size:12px; }
+  #ver { font-size:10px; color:var(--sub); opacity:.8; }
   .row label { color:var(--sub); }
   .row output { text-align:right; color:var(--ink); font-variant-numeric:tabular-nums; }
   .row input[type=range] { width:100%; accent-color:var(--accent); }
@@ -98,6 +107,7 @@
 </style>
 </head>
 <body>
+<div id="upd" hidden>新しいバージョンがあります <button id="updBtn">更新する</button></div>
 <div id="app">
   <header id="top">
     <h1>散らし柄タイルメーカー</h1>
@@ -106,7 +116,7 @@
     <button class="tb" id="prjClear" title="素材をすべて消します（設定は残ります）">素材クリア</button>
     <input type="file" id="prjFile" accept=".json,application/json" hidden>
     <span class="sp"></span>
-    <span id="autosave">この端末内で処理・自動保存（画像は外部に送信されません）</span>
+    <span id="ver"></span><span id="autosave">この端末内で処理・自動保存（画像は外部に送信されません）</span>
     <span class="sepv"></span>
     <a class="tb" id="dlPng" hidden download="tile.png">PNG保存</a>
     <button class="tb primary" id="dlPptx" hidden>PPTX保存</button>
@@ -132,8 +142,8 @@
         <div class="row"><label for="gap" title="イラスト同士の最低限の距離">すき間</label><input id="gap" type="range" min="0" max="0.06" step="0.005" value="0.02"><output></output></div>
         <div class="row"><label for="rotate" title="ランダム回転の最大角度">傾き(±°)</label><input id="rotate" type="range" min="0" max="45" step="1" value="12"><output></output></div>
         <div class="row"><label for="seed" title="配置パターンの番号。同じ番号なら同じ配置になります">シード</label><input id="seed" type="number" value="1" min="1"><span></span></div>
-        <div class="row"><label for="px">解像度</label>
-          <select id="px"><option value="2048">2048 px</option><option value="4096" selected>4096 px</option><option value="6000">6000 px</option></select><span></span></div>
+        <div class="row plain"><label for="px">解像度</label>
+          <select id="px"><option value="2048">2048 px</option><option value="4096" selected>4096 px</option><option value="6000">6000 px</option></select></div>
       </div>
       <div class="grp">
         <h2>役割ごと</h2>
@@ -539,6 +549,41 @@ $('prjClear').onclick = () => {
   if (!images.length || !confirm('素材をすべて消します。よろしいですか？（設定は残ります）')) return;
   clearImages(); renderThumbs(); $('status').textContent = '素材をクリアしました';
 };
+
+// ---- ボタンで細かく調整 (− / +。押し続けると連続で動く)。スライダーの刻み幅ぶん動きます
+function addSteppers() {
+  document.querySelectorAll('.row').forEach(row => {
+    const inp = row.querySelector('input[type=range], input[type=number]');
+    if (!inp || row.querySelector('.stp')) return;
+    const mk = (txt, dir) => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'stp'; b.textContent = txt;
+      b.title = dir < 0 ? '減らす（押し続けで連続）' : '増やす（押し続けで連続）';
+      const step = () => { dir < 0 ? inp.stepDown() : inp.stepUp(); inp.dispatchEvent(new Event('input', {bubbles: true})); inp.dispatchEvent(new Event('change', {bubbles: true})); };
+      let t1 = null, t2 = null;
+      const stop = () => { clearTimeout(t1); clearInterval(t2); };
+      b.addEventListener('pointerdown', e => { e.preventDefault(); step(); t1 = setTimeout(() => { t2 = setInterval(step, 70); }, 400); });
+      ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => b.addEventListener(ev, stop));
+      b.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); step(); } });
+      return b;
+    };
+    inp.before(mk('−', -1)); inp.after(mk('+', 1));
+  });
+}
+addSteppers();
+
+// ---- 版の確認: 古い画面がキャッシュに残っていても、新しい版が出たら知らせる
+const VERSION = '2026-09-20-3';
+$('ver').textContent = 'v' + VERSION;
+(async () => {
+  try {
+    const r = await fetch('version.json?t=' + Date.now(), {cache: 'no-store'});
+    const j = await r.json();
+    if (j.version && j.version !== VERSION) {
+      $('upd').hidden = false;
+      $('updBtn').onclick = () => location.replace(location.pathname + '?v=' + encodeURIComponent(j.version));
+    }
+  } catch (e) {}   // file:// など取得できない環境では何もしない
+})();
 
 // ---- 生成
 // SVG は createImageBitmap で直接読めないので、<img> 経由で十分大きく描画してから渡す
