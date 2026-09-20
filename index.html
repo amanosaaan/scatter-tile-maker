@@ -37,6 +37,7 @@
   .acts button { padding:4px 9px; border:1px solid var(--line); border-radius:999px; background:var(--card); color:var(--ink); cursor:pointer; font-size:11px; font-family:inherit; }
   .acts button:hover { border-color:var(--accent); }
   .acts .lbl { width:100%; font-size:11px; color:var(--sub); }
+  .th button.back { right:auto; left:-6px; background:var(--accent); }
   .th button { position:absolute; top:-6px; right:-6px; width:17px; height:17px; border-radius:50%; border:0; background:#555; color:#fff; font-size:10px; line-height:17px; padding:0; cursor:pointer; }
   .row { display:grid; grid-template-columns:78px 1fr 52px; align-items:center; gap:8px; margin:6px 0; font-size:12px; }
   .row output { text-align:right; color:var(--sub); font-variant-numeric:tabular-nums; }
@@ -329,7 +330,7 @@ function buildZone(t) {
     <div class="cnt" id="${cntId(t)}">0枚</div>
     <div class="drop">${t < 0 ? 'まとめてドロップ / クリックで追加' : 'ドロップ / クリックで追加'}</div>
     <input type="file" accept="image/*" multiple hidden>
-    <div class="thumbs" id="${zoneId(t)}"></div>` + (t < 0 ? `
+    <div class="thumbs" id="${zoneId(t)}"></div>` + (t >= 0 ? `<div class="acts"><button data-back="${t}">この枠を全て未振り分けへ戻す</button></div>` : '') + (t < 0 ? `
     <div class="acts">
       <span class="lbl">選択中: <b id="selCount">0</b>枚 → 移動先</span>
       ${TIERS.map((x, i) => `<button data-to="${i}">${x.name}へ</button>`).join('')}
@@ -352,7 +353,8 @@ function buildZone(t) {
     if (own) moveImages(JSON.parse(own), t); else addFiles(e.dataTransfer.files, t);
   });
   d.querySelectorAll('.acts button').forEach(btn => btn.onclick = () => {
-    if (btn.dataset.to != null) { if (selected.size) moveImages([...selected], +btn.dataset.to); }
+    if (btn.dataset.back != null) moveImages(images.filter(im => im.tier === t).map(im => im.id), -1);
+    else if (btn.dataset.to != null) { if (selected.size) moveImages([...selected], +btn.dataset.to); }
     else { selected.clear(); if (btn.dataset.sel === 'pool') images.filter(im => im.tier < 0).forEach(im => selected.add(im.id)); renderThumbs(); }
   });
 }
@@ -361,8 +363,10 @@ function buildZone(t) {
 ['dragover', 'drop'].forEach(t => window.addEventListener(t, e => e.preventDefault()));
 
 function addFiles(files, tier) {
-  [...files].filter(f => f.type.startsWith('image/')).forEach(f =>
-    images.push({id: nextId++, name: f.name, file: f, url: URL.createObjectURL(f), tier}));
+  [...files].filter(f => f.type.startsWith('image/') || isSvg(f)).forEach(f => {
+    if (isSvg(f) && f.type !== 'image/svg+xml') f = new File([f], f.name, {type: 'image/svg+xml'});   // 種類が空でも SVG として読む
+    images.push({id: nextId++, name: f.name, file: f, url: URL.createObjectURL(f), tier});
+  });
   renderThumbs();
 }
 function moveImages(ids, to) {
@@ -375,7 +379,9 @@ function renderThumbs() {
   images.forEach(im => {
     const d = document.createElement('div'); d.className = 'th' + (selected.has(im.id) ? ' sel' : '');
     d.draggable = true; d.title = im.name;
-    d.innerHTML = `<img src="${im.url}" alt="" draggable="false"><button title="削除">×</button>`;
+    d.innerHTML = `<img src="${im.url}" alt="" draggable="false"><button title="削除">×</button>${im.tier >= 0 ? '<button class="back" title="未振り分けに戻す">↩</button>' : ''}`;
+    const back = d.querySelector('button.back');
+    if (back) back.onclick = ev => { ev.stopPropagation(); moveImages([im.id], -1); };
     d.querySelector('button').onclick = ev => {
       ev.stopPropagation(); URL.revokeObjectURL(im.url); selected.delete(im.id);
       images.splice(images.indexOf(im), 1); renderThumbs();
@@ -409,6 +415,16 @@ document.querySelectorAll('.row input[type=range]').forEach(r => {
 ['seed', 'px'].forEach(k => $(k).addEventListener('change', saveSettings));
 
 // ---- 生成
+// SVG は createImageBitmap で直接読めないので、<img> 経由で十分大きく描画してから渡す
+const isSvg = f => f.type === 'image/svg+xml' || /\.svg$/i.test(f.name);
+async function toBitmap(im) {
+  if (!isSvg(im.file)) return createImageBitmap(im.file);
+  const img = new Image(); img.src = im.url; await img.decode();
+  const nw = img.naturalWidth || 300, nh = img.naturalHeight || 300, k = 1600 / Math.max(nw, nh);
+  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(nw * k)); c.height = Math.max(1, Math.round(nh * k));
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  return createImageBitmap(c);
+}
 const workerUrl = URL.createObjectURL(new Blob([$('worker-src').textContent], {type: 'text/javascript'}));
 let worker = null, result = null, tileUrl = null;
 
@@ -423,7 +439,7 @@ async function run(newSeed) {
     `生成中… ${Math.round((Date.now() - t0) / 1000)}秒${attempt > 1 ? ` (重なりを避けて再試行 ${attempt}回目)` : ''}`, 300);
   const finish = msg => { clearInterval(tick); $('status').textContent = msg; setBusy(false); if (worker) { worker.terminate(); worker = null; } };
   try {
-    const bitmaps = await Promise.all(use.map(im => createImageBitmap(im.file)));
+    const bitmaps = await Promise.all(use.map(toBitmap));
     const params = {size: $('size').value, gap: $('gap').value, rotate: $('rotate').value, seed: $('seed').value, px: $('px').value,
       repeats: TIERS.map((_, i) => $('rep' + i).value), scales: TIERS.map((_, i) => $('scl' + i).value)};
     worker = new Worker(workerUrl);
