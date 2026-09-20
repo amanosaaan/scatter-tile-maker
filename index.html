@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>散らし柄タイルメーカー</title>
+<style>
+  :root { --bg:#faf8f5; --card:#fff; --ink:#2b2622; --sub:#7a716a; --line:#e6e0d8; --accent:#e8862a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1e1b19; --card:#2a2623; --ink:#f1ebe4; --sub:#a39a91; --line:#3d3733; --accent:#f0993f; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui,"Hiragino Sans","Yu Gothic UI",sans-serif; }
+  header { padding:14px 24px 0; }
+  h1 { margin:0; font-size:18px; }
+  header p { margin:2px 0 0; color:var(--sub); font-size:12px; }
+  main { display:grid; grid-template-columns:360px 1fr; gap:20px; padding:14px 24px 24px; align-items:start; }
+  @media (max-width:860px) { main { grid-template-columns:1fr; } #stage { position:static !important; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; }
+  .card + .card { margin-top:14px; }
+  h2 { margin:0 0 8px; font-size:14px; }
+  .tier { border:1px solid var(--line); border-radius:10px; padding:10px; margin-bottom:10px; }
+  .tier:last-child { margin-bottom:0; }
+  .tier h3 { margin:0; font-size:13px; display:flex; justify-content:space-between; align-items:baseline; }
+  .tier h3 small { color:var(--sub); font-weight:400; font-size:11px; }
+  .cnt { font-size:11px; color:var(--sub); margin-top:2px; }
+  .drop { margin-top:6px; border:2px dashed var(--line); border-radius:8px; padding:10px 8px; text-align:center; color:var(--sub); cursor:pointer; font-size:12px; }
+  .drop.over { border-color:var(--accent); color:var(--accent); }
+  .thumbs { display:grid; grid-template-columns:repeat(auto-fill,minmax(46px,1fr)); gap:5px; margin-top:6px; }
+  .th { position:relative; aspect-ratio:1; border:1px solid var(--line); border-radius:7px; background:#fff; display:flex; align-items:center; justify-content:center; }
+  .th img { max-width:86%; max-height:86%; }
+  .th button { position:absolute; top:-6px; right:-6px; width:17px; height:17px; border-radius:50%; border:0; background:#555; color:#fff; font-size:10px; line-height:17px; padding:0; cursor:pointer; }
+  .row { display:grid; grid-template-columns:78px 1fr 52px; align-items:center; gap:8px; margin:6px 0; font-size:12px; }
+  .row output { text-align:right; color:var(--sub); font-variant-numeric:tabular-nums; }
+  .row input[type=range] { width:100%; accent-color:var(--accent); }
+  select, input[type=number] { width:100%; padding:4px 6px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--ink); }
+  .btn { display:block; width:100%; padding:10px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-size:15px; font-weight:600; cursor:pointer; }
+  .btn:disabled { opacity:.5; cursor:wait; }
+  .btn.sec { background:var(--card); color:var(--ink); border:1px solid var(--line); font-weight:500; }
+  #status { margin-top:8px; font-size:12px; color:var(--sub); min-height:18px; }
+  #stage { position:sticky; top:14px; }
+  .bar { display:flex; gap:6px; margin-bottom:8px; flex-wrap:wrap; align-items:center; }
+  .bar button, .bar a { padding:5px 12px; border:1px solid var(--line); border-radius:999px; background:var(--card); color:var(--ink); cursor:pointer; font-size:12px; text-decoration:none; font-family:inherit; }
+  .bar button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .bar .sp { flex:1; }
+  .bar a:hover, .bar button:hover { border-color:var(--accent); }
+  /* ステージ全体が画面内に収まるよう、高さ基準で正方形の大きさを決める */
+  #view { width:min(100%, calc(100vh - 150px)); aspect-ratio:1; margin:0 auto; border:1px solid var(--line); border-radius:8px; background:#fff no-repeat center / contain; display:flex; align-items:center; justify-content:center; color:var(--sub); font-size:13px; text-align:center; padding:12px; }
+  #view.x3 { background-repeat:repeat; }
+</style>
+</head>
+<body>
+<header>
+  <h1>散らし柄タイルメーカー</h1>
+  <p>役割ごとに素材を入れると、大きさに差をつけて、重ならず・上下左右がつながる散らし柄タイルを作ります。（すべてこのブラウザ内で処理。画像は外部に送信されません）</p>
+</header>
+<main>
+  <div>
+    <div class="card">
+      <h2>1. イラスト素材（役割ごと）</h2>
+      <div id="tiers"></div>
+    </div>
+    <div class="card">
+      <h2>2. 設定</h2>
+      <div class="row"><label for="size">基準サイズ</label><input id="size" type="range" min="0.08" max="0.22" step="0.005" value="0.13"><output></output></div>
+      <div class="row"><label for="gap">すき間</label><input id="gap" type="range" min="0" max="0.06" step="0.005" value="0.02"><output></output></div>
+      <div class="row"><label for="rotate">傾き(±°)</label><input id="rotate" type="range" min="0" max="45" step="1" value="12"><output></output></div>
+      <div class="row"><label for="seed">シード</label><input id="seed" type="number" value="1" min="1"><span></span></div>
+      <div class="row"><label for="px">解像度</label>
+        <select id="px"><option value="2048">2048 px</option><option value="4096" selected>4096 px</option><option value="6000">6000 px</option></select><span></span></div>
+      <button id="go" class="btn">タイルを作る</button>
+      <button id="shuffle" class="btn sec" style="margin-top:8px">別のパターンで作る</button>
+      <div id="status"></div>
+    </div>
+  </div>
+  <div class="card" id="stage">
+    <div class="bar">
+      <button id="t1">1枚</button><button id="t3" class="on">3×3 で継ぎ目確認</button>
+      <span class="sp"></span>
+      <a id="dlPng" hidden download="tile.png">PNG保存</a>
+      <button id="dlPptx" hidden>PPTX保存</button>
+    </div>
+    <div id="view"><span id="empty">素材を入れて「タイルを作る」を押してください</span></div>
+  </div>
+</main>
+
+<script src="lib/pptxgen.bundle.js"></script>
+
+<!-- ============ 生成処理 (Web Worker で実行。画面が固まらない) ============ -->
+<script id="worker-src" type="javascript/worker">
+const SPRITE_ALPHA_CROP = 8;
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function shuffle(arr, rng) {
+  for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; }
+  return arr;
+}
+function alphaBBox(d, w, h, th) {
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (d[(y * w + x) * 4 + 3] > th) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  }
+  return x1 < 0 ? null : {x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1};
+}
+
+// ---- 素材の前処理: 外周とつながった白だけを透明にする (ゴーストの内側の白は残す)
+function prep(bmp) {
+  const w = bmp.width, h = bmp.height;
+  const c = new OffscreenCanvas(w, h), x = c.getContext('2d', {willReadFrequently: true});
+  x.fillStyle = '#fff'; x.fillRect(0, 0, w, h); x.drawImage(bmp, 0, 0);
+  const id = x.getImageData(0, 0, w, h), d = id.data, n = w * h;
+  const near = new Uint8Array(n);
+  for (let i = 0; i < n; i++) near[i] = Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) >= 232 ? 1 : 0;
+  const bg = new Uint8Array(n), stack = new Int32Array(n); let sp = 0;
+  const seed = (px, py) => { const i = py * w + px; if (near[i] && !bg[i]) { bg[i] = 1; stack[sp++] = i; } };
+  for (let i = 0; i < w; i++) { seed(i, 0); seed(i, h - 1); }
+  for (let j = 0; j < h; j++) { seed(0, j); seed(w - 1, j); }
+  while (sp) {
+    const i = stack[--sp], px = i % w, py = (i / w) | 0;
+    if (px > 0) seed(px - 1, py); if (px < w - 1) seed(px + 1, py);
+    if (py > 0) seed(px, py - 1); if (py < h - 1) seed(px, py + 1);
+  }
+  // 白い縁を1px削る (3x3 最小値) → なめらかに (ガウシアン σ=0.8)
+  let a = new Float32Array(n);
+  for (let i = 0; i < n; i++) a[i] = bg[i] ? 0 : 255;
+  const er = new Float32Array(n);
+  for (let y = 0; y < h; y++) for (let x2 = 0; x2 < w; x2++) {
+    let m = 255;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const yy = Math.min(h - 1, Math.max(0, y + dy)), xx = Math.min(w - 1, Math.max(0, x2 + dx));
+      const v = a[yy * w + xx]; if (v < m) m = v;
+    }
+    er[y * w + x2] = m;
+  }
+  const ker = []; let ks = 0;
+  for (let k = -2; k <= 2; k++) { const v = Math.exp(-k * k / (2 * 0.8 * 0.8)); ker.push(v); ks += v; }
+  const tmp = new Float32Array(n);
+  for (let y = 0; y < h; y++) for (let x2 = 0; x2 < w; x2++) {
+    let s = 0; for (let k = -2; k <= 2; k++) s += er[y * w + Math.min(w - 1, Math.max(0, x2 + k))] * ker[k + 2];
+    tmp[y * w + x2] = s / ks;
+  }
+  for (let y = 0; y < h; y++) for (let x2 = 0; x2 < w; x2++) {
+    let s = 0; for (let k = -2; k <= 2; k++) s += tmp[Math.min(h - 1, Math.max(0, y + k)) * w + x2] * ker[k + 2];
+    d[(y * w + x2) * 4 + 3] = Math.round(s / ks);
+  }
+  const bb = alphaBBox(d, w, h, SPRITE_ALPHA_CROP);
+  if (!bb) throw new Error('素材が真っ白 (または全面が背景) と判定されました');
+  x.putImageData(id, 0, 0);
+  const oc = new OffscreenCanvas(bb.w, bb.h);
+  oc.getContext('2d').drawImage(c, bb.x, bb.y, bb.w, bb.h, 0, 0, bb.w, bb.h);
+  let area = 0;
+  for (let y = bb.y; y < bb.y + bb.h; y++) for (let x2 = bb.x; x2 < bb.x + bb.w; x2++) if (d[(y * w + x2) * 4 + 3] > 128) area++;
+  // 面積と最大寸法の中間で大きさを揃える
+  return {canvas: oc, w: bb.w, h: bb.h, metric: Math.sqrt(Math.sqrt(area) * Math.max(bb.w, bb.h))};
+}
+
+function makeSprite(src, k, angDeg) {
+  const w = Math.max(1, Math.round(src.w * k)), h = Math.max(1, Math.round(src.h * k));
+  const rad = angDeg * Math.PI / 180;
+  const cw = Math.ceil(Math.abs(w * Math.cos(rad)) + Math.abs(h * Math.sin(rad))) + 2;
+  const ch = Math.ceil(Math.abs(w * Math.sin(rad)) + Math.abs(h * Math.cos(rad))) + 2;
+  const c = new OffscreenCanvas(cw, ch), x = c.getContext('2d', {willReadFrequently: true});
+  x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
+  x.translate(cw / 2, ch / 2); x.rotate(rad);
+  x.drawImage(src.canvas, -w / 2, -h / 2, w, h);
+  const d = x.getImageData(0, 0, cw, ch).data;
+  const bb = alphaBBox(d, cw, ch, SPRITE_ALPHA_CROP) || {x: 0, y: 0, w: cw, h: ch};
+  const oc = new OffscreenCanvas(bb.w, bb.h);
+  oc.getContext('2d').drawImage(c, bb.x, bb.y, bb.w, bb.h, 0, 0, bb.w, bb.h);
+  return {canvas: oc, w: bb.w, h: bb.h};
+}
+
+// ---- 配置: 上下左右がつながる面(トーラス)上で、重ならず均等に散る位置を求める
+const tdelta = d => d - Math.round(d);
+function place(radii, groups, rng, gap, sameGap) {
+  const n = radii.length;
+  const need = new Float64Array(n * n);
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++)
+    need[i * n + j] = radii[i] + radii[j] + gap + (groups[i] === groups[j] ? sameGap : 0);
+  const order = [...Array(n).keys()].sort((a, b) => radii[b] - radii[a]);
+  const pos = new Float64Array(n * 2), placed = [];
+  for (const i of order) {   // best-candidate 法: 既存配置から一番余裕がある場所を選ぶ
+    if (!placed.length) { pos[i * 2] = rng(); pos[i * 2 + 1] = rng(); }
+    else {
+      let bx = 0, by = 0, bs = -1e9;
+      for (let c = 0; c < 400; c++) {
+        const cx = rng(), cy = rng(); let sc = 1e9;
+        for (const j of placed) {
+          const d = Math.hypot(tdelta(cx - pos[j * 2]), tdelta(cy - pos[j * 2 + 1])) - need[i * n + j];
+          if (d < sc) sc = d;
+        }
+        if (sc > bs) { bs = sc; bx = cx; by = cy; }
+      }
+      pos[i * 2] = bx; pos[i * 2 + 1] = by;
+    }
+    placed.push(i);
+  }
+  const ITERS = 60;
+  for (let it = 0; it < ITERS; it++) {   // 反発で均す
+    const step = 0.02 * (1 - it / ITERS) + 0.002, f = new Float64Array(n * 2);
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+      if (i === j) continue;
+      const dx = tdelta(pos[i * 2] - pos[j * 2]), dy = tdelta(pos[i * 2 + 1] - pos[j * 2 + 1]);
+      const dist = Math.hypot(dx, dy) + 1e-9, reach = need[i * n + j] * 1.7;
+      const w = Math.max(0, 1 - dist / reach) ** 2;
+      f[i * 2] += dx / dist * w; f[i * 2 + 1] += dy / dist * w;
+    }
+    for (let i = 0; i < n * 2; i++) pos[i] = (((pos[i] + f[i] * step) % 1) + 1) % 1;
+  }
+  return pos;
+}
+
+// ---- 低解像度でアルファ同士の重なりを実測
+function countOverlap(sprites, pos, px) {
+  const W = 1024, s = W / px, total = new Uint8Array(W * W);
+  sprites.forEach((sp, i) => {
+    const mw = Math.max(1, Math.floor(sp.w * s)), mh = Math.max(1, Math.floor(sp.h * s));
+    const c = new OffscreenCanvas(mw, mh), x = c.getContext('2d', {willReadFrequently: true});
+    x.drawImage(sp.canvas, 0, 0, mw, mh);
+    const d = x.getImageData(0, 0, mw, mh).data;
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+      const ox = Math.round((pos[i * 2] + dx) * W - mw / 2), oy = Math.round((pos[i * 2 + 1] + dy) * W - mh / 2);
+      for (let y = Math.max(0, oy); y < Math.min(W, oy + mh); y++) for (let x2 = Math.max(0, ox); x2 < Math.min(W, ox + mw); x2++)
+        if (d[((y - oy) * mw + (x2 - ox)) * 4 + 3] > 128) total[y * W + x2]++;
+    }
+  });
+  let bad = 0; for (let i = 0; i < total.length; i++) if (total[i] > 1) bad++;
+  return bad;
+}
+
+function build(motifs, a, seed) {
+  const rng = mulberry32(seed), px = a.px, seq = [], tiers = [];
+  for (let t = 0; t < 3; t++) {   // 役割ごとに全種を巡回 (連続重複なし)
+    const pool = motifs.map((m, i) => m.tier === t ? i : -1).filter(i => i >= 0), count = a.counts[t];
+    if (!pool.length || count <= 0) continue;
+    let part = [];
+    while (part.length < count) {
+      const cyc = shuffle(pool.slice(), rng);
+      if (part.length && pool.length > 1 && cyc[0] === part[part.length - 1]) cyc.push(cyc.shift());
+      part = part.concat(cyc);
+    }
+    part.slice(0, count).forEach(g => { seq.push(g); tiers.push(t); });
+  }
+  const sprites = [], radii = [], groups = [];
+  seq.forEach((gi, n) => {
+    const m = motifs[gi];
+    const k = a.size * a.scales[tiers[n]] * px * (0.92 + 0.16 * rng()) / m.metric;
+    const sp = makeSprite(m, k, (rng() * 2 - 1) * a.rotate);
+    sprites.push(sp); radii.push(0.5 * Math.hypot(sp.w, sp.h) * 0.78 / px); groups.push(gi);
+  });
+  const pos = place(radii, groups, rng, a.gap, 0.12);
+  return {seq, sprites, pos, bad: countOverlap(sprites, pos, px)};
+}
+
+async function render(sprites, pos, px) {
+  const c = new OffscreenCanvas(px, px), x = c.getContext('2d');
+  x.fillStyle = '#fff'; x.fillRect(0, 0, px, px);
+  sprites.forEach((sp, i) => {
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++)   // 端をまたぐものは反対側にも描く
+      x.drawImage(sp.canvas, Math.round((pos[i * 2] + dx) * px - sp.w / 2), Math.round((pos[i * 2 + 1] + dy) * px - sp.h / 2));
+  });
+  return c.convertToBlob({type: 'image/png'});
+}
+
+self.onmessage = async e => {
+  try {
+    const {sources, params: p} = e.data, px = +p.px;
+    const motifs = sources.map(s => Object.assign({name: s.name, tier: s.tier}, prep(s.bitmap)));
+    const args = {px, size: +p.size, gap: +p.gap, rotate: +p.rotate, scales: p.scales.map(Number),
+      counts: [0, 1, 2].map(t => motifs.filter(m => m.tier === t).length * (+p.repeats[t]))};
+    const seed0 = Math.floor(+p.seed), t0 = Date.now();
+    let best = null;
+    for (let t = 0; t < 30; t++) {   // 重なりが残る時は別シードで再試行 (最大30回/40秒。最良の結果を採用)
+      const cur = seed0 + t, r = build(motifs, args, cur); r.seed = cur;
+      if (!best || r.bad < best.bad) best = r;
+      self.postMessage({type: 'progress', attempt: t + 1, bad: best.bad});
+      if (best.bad === 0 || Date.now() - t0 > 40000) break;
+    }
+    const tile = await render(best.sprites, best.pos, px);
+    const sprites = [];
+    for (let i = 0; i < best.sprites.length; i++)
+      sprites.push({blob: await best.sprites[i].canvas.convertToBlob({type: 'image/png'}),
+        w: best.sprites[i].w, h: best.sprites[i].h, cx: best.pos[i * 2], cy: best.pos[i * 2 + 1]});
+    self.postMessage({type: 'done', tile, sprites, px, seed: best.seed, bad: best.bad, count: best.seq.length});
+  } catch (err) {
+    self.postMessage({type: 'error', message: String((err && err.message) || err)});
+  }
+};
+</script>
+
+<!-- ============ 画面 ============ -->
+<script>
+const $ = id => document.getElementById(id);
+const SLIDE_CM = 52.921;
+// 役割: 名前(仮)・ヒント・サイズ倍率
+const TIERS = [
+  {name:'メイン',     hint:'ゴースト・かぼちゃなど大きめ', scale:1.0},
+  {name:'サブ',       hint:'葉っぱ・あめなど小さめ',       scale:0.62},
+  {name:'アクセント', hint:'水玉・星など細かい装飾',       scale:0.38},
+];
+let images = [];   // {name, file, url, tier}
+
+const wrap = $('tiers');
+TIERS.forEach((t, i) => {
+  const d = document.createElement('div'); d.className = 'tier';
+  d.innerHTML = `
+    <h3>${t.name}<small>${t.hint}</small></h3>
+    <div class="cnt" id="cn${i}">0枚</div>
+    <div class="drop">ドロップ / クリックで追加</div>
+    <input type="file" accept="image/*" multiple hidden>
+    <div class="thumbs" id="th${i}"></div>
+    <div class="row"><label>使用回数</label><input type="range" id="rep${i}" min="1" max="6" step="1" value="1"><output></output></div>
+    <div class="row"><label>サイズ倍率</label><input type="range" id="scl${i}" min="0.2" max="1.4" step="0.02" value="${t.scale}"><output></output></div>`;
+  wrap.appendChild(d);
+  const drop = d.querySelector('.drop'), file = d.querySelector('input[type=file]');
+  drop.onclick = () => file.click();
+  file.onchange = e => { addFiles(e.target.files, i); e.target.value = ''; };
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); drop.classList.remove('over'); addFiles(e.dataTransfer.files, i); });
+});
+// 枠の外にドロップしてもブラウザが画像を開いてしまわないように
+['dragover', 'drop'].forEach(t => window.addEventListener(t, e => e.preventDefault()));
+
+function addFiles(files, tier) {
+  [...files].filter(f => f.type.startsWith('image/')).forEach(f =>
+    images.push({name: f.name, file: f, url: URL.createObjectURL(f), tier}));
+  renderThumbs();
+}
+function renderThumbs() {
+  TIERS.forEach((_, t) => { $('th' + t).innerHTML = ''; $('cn' + t).textContent = images.filter(m => m.tier === t).length + '枚'; });
+  images.forEach((im, i) => {
+    const d = document.createElement('div'); d.className = 'th';
+    d.innerHTML = `<img src="${im.url}" alt=""><button title="削除">×</button>`;
+    d.querySelector('button').onclick = () => { URL.revokeObjectURL(im.url); images.splice(i, 1); renderThumbs(); };
+    $('th' + im.tier).appendChild(d);
+  });
+}
+
+// 設定値の表示と保存 (次回開いた時に復元)
+const KEY = 'scatter-tile-settings-v1';
+const SAVED = ['size', 'gap', 'rotate', 'seed', 'px', ...TIERS.flatMap((_, i) => ['rep' + i, 'scl' + i])];
+function loadSettings() {
+  try { const s = JSON.parse(localStorage.getItem(KEY) || '{}'); SAVED.forEach(k => { if (s[k] != null && $(k)) $(k).value = s[k]; }); } catch (e) {}
+}
+function saveSettings() {
+  try { const s = {}; SAVED.forEach(k => s[k] = $(k).value); localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {}
+}
+loadSettings();
+document.querySelectorAll('.row input[type=range]').forEach(r => {
+  const o = r.parentElement.querySelector('output');
+  const upd = () => o.textContent = r.id === 'size' || r.id === 'gap' ? (r.value * 100).toFixed(1) + '%'
+    : r.id.startsWith('scl') ? '×' + (+r.value).toFixed(2) : r.id.startsWith('rep') ? r.value + '回ずつ' : r.value;
+  r.addEventListener('input', () => { upd(); saveSettings(); }); upd();
+});
+['seed', 'px'].forEach(k => $(k).addEventListener('change', saveSettings));
+
+// ---- 生成
+const workerUrl = URL.createObjectURL(new Blob([$('worker-src').textContent], {type: 'text/javascript'}));
+let worker = null, result = null, tileUrl = null;
+
+function setBusy(b) { $('go').disabled = $('shuffle').disabled = b; }
+async function run(newSeed) {
+  if (!images.length) { $('status').textContent = '先に素材を入れてください'; return; }
+  if (newSeed) { $('seed').value = Math.floor(Math.random() * 9000) + 1; saveSettings(); }
+  setBusy(true);
+  const t0 = Date.now(); let attempt = 0;
+  const tick = setInterval(() => $('status').textContent =
+    `生成中… ${Math.round((Date.now() - t0) / 1000)}秒${attempt > 1 ? ` (重なりを避けて再試行 ${attempt}回目)` : ''}`, 300);
+  const finish = msg => { clearInterval(tick); $('status').textContent = msg; setBusy(false); if (worker) { worker.terminate(); worker = null; } };
+  try {
+    const bitmaps = await Promise.all(images.map(im => createImageBitmap(im.file)));
+    const params = {size: $('size').value, gap: $('gap').value, rotate: $('rotate').value, seed: $('seed').value, px: $('px').value,
+      repeats: TIERS.map((_, i) => $('rep' + i).value), scales: TIERS.map((_, i) => $('scl' + i).value)};
+    worker = new Worker(workerUrl);
+    worker.onmessage = e => {
+      const m = e.data;
+      if (m.type === 'progress') attempt = m.attempt;
+      else if (m.type === 'error') finish('エラー: ' + m.message);
+      else if (m.type === 'done') {
+        show(m); $('seed').value = m.seed; saveSettings();
+        finish(m.bad === 0 ? `完了: ${m.count}個、重なりなし (seed ${m.seed}、${Math.round((Date.now() - t0) / 1000)}秒)`
+          : '重なりが残っています。「すき間」を増やすか、サイズ・使用回数を減らしてください');
+      }
+    };
+    worker.onerror = e => finish('エラー: ' + (e.message || '不明なエラー'));
+    worker.postMessage({sources: images.map((im, i) => ({name: im.name, tier: im.tier, bitmap: bitmaps[i]})), params}, bitmaps);
+  } catch (e) { finish('エラー: ' + e.message); }
+}
+
+function show(m) {
+  result = m;
+  if (tileUrl) URL.revokeObjectURL(tileUrl);
+  tileUrl = URL.createObjectURL(m.tile);
+  $('view').style.backgroundImage = `url(${tileUrl})`;
+  $('empty').hidden = true;
+  $('dlPng').href = tileUrl; $('dlPng').hidden = false; $('dlPptx').hidden = false;
+  setTab(tab3);
+}
+
+// ---- PPTX (各イラストが個別オブジェクト。端をまたぐものは反対側にもはみ出して配置)
+const toB64 = blob => new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.readAsDataURL(blob); });
+$('dlPptx').onclick = async () => {
+  if (!result) return;
+  $('dlPptx').disabled = true; const old = $('dlPptx').textContent; $('dlPptx').textContent = '作成中…';
+  try {
+    const S = SLIDE_CM / 2.54, pptx = new PptxGenJS();
+    pptx.defineLayout({name: 'SQ', width: S, height: S}); pptx.layout = 'SQ';
+    const slide = pptx.addSlide(); slide.background = {color: 'FFFFFF'};
+    for (const sp of result.sprites) {
+      const data = 'image/png;base64,' + await toB64(sp.blob), w = sp.w / result.px * S, h = sp.h / result.px * S;
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+        const x = (sp.cx + dx) * S - w / 2, y = (sp.cy + dy) * S - h / 2;
+        if (x + w <= 0 || y + h <= 0 || x >= S || y >= S) continue;
+        slide.addImage({data, x, y, w, h});
+      }
+    }
+    const blob = await pptx.write({outputType: 'blob'});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'scatter.pptx'; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  } catch (e) { $('status').textContent = 'PPTX作成エラー: ' + e.message; }
+  $('dlPptx').disabled = false; $('dlPptx').textContent = old;
+};
+
+let tab3 = true;
+function setTab(x3) {
+  tab3 = x3;
+  $('t1').classList.toggle('on', !x3); $('t3').classList.toggle('on', x3);
+  $('view').classList.toggle('x3', x3);
+  $('view').style.backgroundSize = x3 ? '33.333% 33.333%' : 'contain';
+}
+$('t1').onclick = () => setTab(false);
+$('t3').onclick = () => setTab(true);
+$('go').onclick = () => run(false);
+$('shuffle').onclick = () => run(true);
+setTab(true);
+</script>
+</body>
+</html>
