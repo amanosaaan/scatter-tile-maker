@@ -29,6 +29,14 @@
   .thumbs { display:grid; grid-template-columns:repeat(auto-fill,minmax(46px,1fr)); gap:5px; margin-top:6px; }
   .th { position:relative; aspect-ratio:1; border:1px solid var(--line); border-radius:7px; background:#fff; display:flex; align-items:center; justify-content:center; }
   .th img { max-width:86%; max-height:86%; }
+  .th { cursor:pointer; user-select:none; }
+  .th.sel { outline:3px solid var(--accent); outline-offset:1px; }
+  .tier.over { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 8%, transparent); }
+  .tier.pool { border-style:dashed; }
+  .acts { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
+  .acts button { padding:4px 9px; border:1px solid var(--line); border-radius:999px; background:var(--card); color:var(--ink); cursor:pointer; font-size:11px; font-family:inherit; }
+  .acts button:hover { border-color:var(--accent); }
+  .acts .lbl { width:100%; font-size:11px; color:var(--sub); }
   .th button { position:absolute; top:-6px; right:-6px; width:17px; height:17px; border-radius:50%; border:0; background:#555; color:#fff; font-size:10px; line-height:17px; padding:0; cursor:pointer; }
   .row { display:grid; grid-template-columns:78px 1fr 52px; align-items:center; gap:8px; margin:6px 0; font-size:12px; }
   .row output { text-align:right; color:var(--sub); font-variant-numeric:tabular-nums; }
@@ -57,7 +65,8 @@
 <main>
   <div>
     <div class="card">
-      <h2>1. イラスト素材（役割ごと）</h2>
+      <h2>1. イラスト素材</h2>
+      <p style="margin:0 0 8px;font-size:11px;color:var(--sub)">まとめて「未振り分け」に入れ、画像をクリックで選択（複数可）→ボタン、またはドラッグで役割へ振り分けます。</p>
       <div id="tiers"></div>
     </div>
     <div class="card">
@@ -307,41 +316,78 @@ const TIERS = [
 ];
 let images = [];   // {name, file, url, tier}
 
+let nextId = 1;
+const selected = new Set();   // 選択中の画像id
+const zoneId = t => 'th' + (t < 0 ? 'P' : t), cntId = t => 'cn' + (t < 0 ? 'P' : t);
 const wrap = $('tiers');
-TIERS.forEach((t, i) => {
-  const d = document.createElement('div'); d.className = 'tier';
+
+function buildZone(t) {
+  const meta = t < 0 ? {name: '未振り分け', hint: 'まとめてここに入れる'} : TIERS[t];
+  const d = document.createElement('div'); d.className = 'tier' + (t < 0 ? ' pool' : '');
   d.innerHTML = `
-    <h3>${t.name}<small>${t.hint}</small></h3>
-    <div class="cnt" id="cn${i}">0枚</div>
-    <div class="drop">ドロップ / クリックで追加</div>
+    <h3>${meta.name}<small>${meta.hint}</small></h3>
+    <div class="cnt" id="${cntId(t)}">0枚</div>
+    <div class="drop">${t < 0 ? 'まとめてドロップ / クリックで追加' : 'ドロップ / クリックで追加'}</div>
     <input type="file" accept="image/*" multiple hidden>
-    <div class="thumbs" id="th${i}"></div>
-    <div class="row"><label>使用回数</label><input type="range" id="rep${i}" min="1" max="6" step="1" value="1"><output></output></div>
-    <div class="row"><label>サイズ倍率</label><input type="range" id="scl${i}" min="0.2" max="1.4" step="0.02" value="${t.scale}"><output></output></div>`;
+    <div class="thumbs" id="${zoneId(t)}"></div>` + (t < 0 ? `
+    <div class="acts">
+      <span class="lbl">選択中: <b id="selCount">0</b>枚 → 移動先</span>
+      ${TIERS.map((x, i) => `<button data-to="${i}">${x.name}へ</button>`).join('')}
+      <button data-to="-1">未振り分けへ</button>
+      <button data-sel="pool">未振り分けを全選択</button>
+      <button data-sel="none">選択解除</button>
+    </div>` : `
+    <div class="row"><label>使用回数</label><input type="range" id="rep${t}" min="1" max="6" step="1" value="1"><output></output></div>
+    <div class="row"><label>サイズ倍率</label><input type="range" id="scl${t}" min="0.2" max="1.4" step="0.02" value="${meta.scale}"><output></output></div>`);
   wrap.appendChild(d);
   const drop = d.querySelector('.drop'), file = d.querySelector('input[type=file]');
   drop.onclick = () => file.click();
-  file.onchange = e => { addFiles(e.target.files, i); e.target.value = ''; };
-  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
-  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
-  drop.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); drop.classList.remove('over'); addFiles(e.dataTransfer.files, i); });
-});
+  file.onchange = e => { addFiles(e.target.files, t); e.target.value = ''; };
+  // 画像のドラッグ移動 / ファイルのドロップ追加 (枠全体が受け皿)
+  d.addEventListener('dragover', e => { e.preventDefault(); d.classList.add('over'); });
+  d.addEventListener('dragleave', e => { if (!d.contains(e.relatedTarget)) d.classList.remove('over'); });
+  d.addEventListener('drop', e => {
+    e.preventDefault(); e.stopPropagation(); d.classList.remove('over');
+    const own = e.dataTransfer.getData('text/x-scatter');
+    if (own) moveImages(JSON.parse(own), t); else addFiles(e.dataTransfer.files, t);
+  });
+  d.querySelectorAll('.acts button').forEach(btn => btn.onclick = () => {
+    if (btn.dataset.to != null) { if (selected.size) moveImages([...selected], +btn.dataset.to); }
+    else { selected.clear(); if (btn.dataset.sel === 'pool') images.filter(im => im.tier < 0).forEach(im => selected.add(im.id)); renderThumbs(); }
+  });
+}
+[-1, 0, 1, 2].forEach(buildZone);
 // 枠の外にドロップしてもブラウザが画像を開いてしまわないように
 ['dragover', 'drop'].forEach(t => window.addEventListener(t, e => e.preventDefault()));
 
 function addFiles(files, tier) {
   [...files].filter(f => f.type.startsWith('image/')).forEach(f =>
-    images.push({name: f.name, file: f, url: URL.createObjectURL(f), tier}));
+    images.push({id: nextId++, name: f.name, file: f, url: URL.createObjectURL(f), tier}));
   renderThumbs();
 }
+function moveImages(ids, to) {
+  const set = new Set(ids);
+  images.forEach(im => { if (set.has(im.id)) im.tier = to; });
+  selected.clear(); renderThumbs();
+}
 function renderThumbs() {
-  TIERS.forEach((_, t) => { $('th' + t).innerHTML = ''; $('cn' + t).textContent = images.filter(m => m.tier === t).length + '枚'; });
-  images.forEach((im, i) => {
-    const d = document.createElement('div'); d.className = 'th';
-    d.innerHTML = `<img src="${im.url}" alt=""><button title="削除">×</button>`;
-    d.querySelector('button').onclick = () => { URL.revokeObjectURL(im.url); images.splice(i, 1); renderThumbs(); };
-    $('th' + im.tier).appendChild(d);
+  [-1, 0, 1, 2].forEach(t => { $(zoneId(t)).innerHTML = ''; $(cntId(t)).textContent = images.filter(m => m.tier === t).length + '枚'; });
+  images.forEach(im => {
+    const d = document.createElement('div'); d.className = 'th' + (selected.has(im.id) ? ' sel' : '');
+    d.draggable = true; d.title = im.name;
+    d.innerHTML = `<img src="${im.url}" alt="" draggable="false"><button title="削除">×</button>`;
+    d.querySelector('button').onclick = ev => {
+      ev.stopPropagation(); URL.revokeObjectURL(im.url); selected.delete(im.id);
+      images.splice(images.indexOf(im), 1); renderThumbs();
+    };
+    d.onclick = () => { selected.has(im.id) ? selected.delete(im.id) : selected.add(im.id); renderThumbs(); };
+    d.ondragstart = e => {   // 選択中の画像をつかんだら選択分をまとめて、そうでなければその1枚だけ移動
+      const ids = selected.has(im.id) ? [...selected] : [im.id];
+      e.dataTransfer.setData('text/x-scatter', JSON.stringify(ids)); e.dataTransfer.effectAllowed = 'move';
+    };
+    $(zoneId(im.tier)).appendChild(d);
   });
+  $('selCount').textContent = selected.size;
 }
 
 // 設定値の表示と保存 (次回開いた時に復元)
@@ -368,7 +414,8 @@ let worker = null, result = null, tileUrl = null;
 
 function setBusy(b) { $('go').disabled = $('shuffle').disabled = b; }
 async function run(newSeed) {
-  if (!images.length) { $('status').textContent = '先に素材を入れてください'; return; }
+  const use = images.filter(im => im.tier >= 0), pool = images.length - use.length;
+  if (!use.length) { $('status').textContent = images.length ? '画像をメイン/サブ/アクセントに振り分けてください' : '先に素材を入れてください'; return; }
   if (newSeed) { $('seed').value = Math.floor(Math.random() * 9000) + 1; saveSettings(); }
   setBusy(true);
   const t0 = Date.now(); let attempt = 0;
@@ -376,7 +423,7 @@ async function run(newSeed) {
     `生成中… ${Math.round((Date.now() - t0) / 1000)}秒${attempt > 1 ? ` (重なりを避けて再試行 ${attempt}回目)` : ''}`, 300);
   const finish = msg => { clearInterval(tick); $('status').textContent = msg; setBusy(false); if (worker) { worker.terminate(); worker = null; } };
   try {
-    const bitmaps = await Promise.all(images.map(im => createImageBitmap(im.file)));
+    const bitmaps = await Promise.all(use.map(im => createImageBitmap(im.file)));
     const params = {size: $('size').value, gap: $('gap').value, rotate: $('rotate').value, seed: $('seed').value, px: $('px').value,
       repeats: TIERS.map((_, i) => $('rep' + i).value), scales: TIERS.map((_, i) => $('scl' + i).value)};
     worker = new Worker(workerUrl);
@@ -386,12 +433,12 @@ async function run(newSeed) {
       else if (m.type === 'error') finish('エラー: ' + m.message);
       else if (m.type === 'done') {
         show(m); $('seed').value = m.seed; saveSettings();
-        finish(m.bad === 0 ? `完了: ${m.count}個、重なりなし (seed ${m.seed}、${Math.round((Date.now() - t0) / 1000)}秒)`
+        finish(m.bad === 0 ? `完了: ${m.count}個、重なりなし (seed ${m.seed}、${Math.round((Date.now() - t0) / 1000)}秒)${pool ? `。未振り分け${pool}枚は使っていません` : ''}`
           : '重なりが残っています。「すき間」を増やすか、サイズ・使用回数を減らしてください');
       }
     };
     worker.onerror = e => finish('エラー: ' + (e.message || '不明なエラー'));
-    worker.postMessage({sources: images.map((im, i) => ({name: im.name, tier: im.tier, bitmap: bitmaps[i]})), params}, bitmaps);
+    worker.postMessage({sources: use.map((im, i) => ({name: im.name, tier: im.tier, bitmap: bitmaps[i]})), params}, bitmaps);
   } catch (e) { finish('エラー: ' + e.message); }
 }
 
