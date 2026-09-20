@@ -56,6 +56,7 @@
   .th:hover button { display:block; }
   .acts { display:flex; flex-wrap:wrap; gap:4px; padding:0 8px 8px; align-items:center; }
   .acts .lbl { width:100%; font-size:10px; color:var(--sub); }
+  .acts .mini.auto { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
   .acts .mini.c0 { border-color:var(--c0); } .acts .mini.c1 { border-color:var(--c1); } .acts .mini.c2 { border-color:var(--c2); }
 
   /* ---- 設定 */
@@ -358,19 +359,22 @@ self.onmessage = async e => {
     const args = {px, size: +p.size, gap: +p.gap, rotate: +p.rotate, scales: p.scales.map(Number),
       counts: [0, 1, 2].map(t => motifs.filter(m => m.tier === t).length * (+p.repeats[t]))};
     const seed0 = Math.floor(+p.seed), t0 = Date.now();
-    let best = null;
-    for (let t = 0; t < 30; t++) {   // 重なりが残る時は別シードで再試行 (最大30回/40秒。最良の結果を採用)
-      const cur = seed0 + t, r = build(motifs, args, cur); r.seed = cur;
+    let best = null, shrink = 1;
+    const baseSize = args.size;
+    for (let t = 0; t < 30; t++) {   // 重なりが残る時は、別シードで作り直し、毎回少し縮小して再試行 (最大30回/40秒)
+      args.size = baseSize * shrink;
+      const cur = seed0 + t, r = build(motifs, args, cur); r.seed = cur; r.shrink = shrink;
       if (!best || r.bad < best.bad) best = r;
       self.postMessage({type: 'progress', attempt: t + 1, bad: best.bad});
       if (best.bad === 0 || Date.now() - t0 > 40000) break;
+      shrink *= 0.94;
     }
     const tile = await render(best.sprites, best.pos, px);
     const sprites = [];
     for (let i = 0; i < best.sprites.length; i++)
       sprites.push({blob: await best.sprites[i].canvas.convertToBlob({type: 'image/png'}),
         w: best.sprites[i].w, h: best.sprites[i].h, cx: best.pos[i * 2], cy: best.pos[i * 2 + 1]});
-    self.postMessage({type: 'done', tile, sprites, px, seed: best.seed, bad: best.bad, count: best.seq.length});
+    self.postMessage({type: 'done', tile, sprites, px, seed: best.seed, bad: best.bad, count: best.seq.length, shrink: best.shrink});
   } catch (err) {
     self.postMessage({type: 'error', message: String((err && err.message) || err)});
   }
@@ -406,6 +410,7 @@ function buildZone(t) {
       <span class="lbl">クリックで選択（複数可）→ 移動先　<b id="selCount">0</b>枚選択中</span>
       ${TIERS.map((x, i) => `<button class="mini c${i}" data-to="${i}">${x.name}へ</button>`).join('')}
       <button class="mini" data-to="-1">未振り分けへ</button>
+      <button class="mini auto" data-auto="1" title="ファイル名（うさぎ・キャンディ等）と画像の大きさから、メイン/サブ/アクセントを推測して振り分けます。選択中があればその画像だけ、なければ未振り分け全部が対象です">✨ 自動振り分け</button>
       <button class="mini" data-sel="pool">全選択</button><button class="mini" data-sel="none">解除</button>
     </div>` : '');
   wrap.appendChild(d);
@@ -421,7 +426,8 @@ function buildZone(t) {
     if (own) moveImages(JSON.parse(own), t); else addFiles(e.dataTransfer.files, t);
   });
   d.querySelectorAll('button[data-back], .acts button').forEach(btn => btn.onclick = () => {
-    if (btn.dataset.back != null) moveImages(images.filter(im => im.tier === t).map(im => im.id), -1);
+    if (btn.dataset.auto != null) autoAssign();
+    else if (btn.dataset.back != null) moveImages(images.filter(im => im.tier === t).map(im => im.id), -1);
     else if (btn.dataset.to != null) { if (selected.size) moveImages([...selected], +btn.dataset.to); }
     else { selected.clear(); if (btn.dataset.sel === 'pool') images.filter(im => im.tier < 0).forEach(im => selected.add(im.id)); renderThumbs(); }
   });
@@ -572,7 +578,7 @@ function addSteppers() {
 addSteppers();
 
 // ---- 版の確認: 古い画面がキャッシュに残っていても、新しい版が出たら知らせる
-const VERSION = '2026-09-20-3';
+const VERSION = '2026-09-20-5';
 $('ver').textContent = 'v' + VERSION;
 (async () => {
   try {
@@ -584,6 +590,49 @@ $('ver').textContent = 'v' + VERSION;
     }
   } catch (e) {}   // file:// など取得できない環境では何もしない
 })();
+
+// ---- 自動振り分け: ファイル名のキーワード → 分からないものは画像の大きさ順で推測
+const KEYWORDS = [   // 上から順に判定 (先に一致した役割になる)
+  [2, /月[2２]|ほし|星|star|ドット|水玉|dot|confetti|きらきら|sparkle/i],
+  [0, /うさぎ|おばけ|オバケ|ゴースト|ghost|かぼちゃ|パンプキン|pumpkin|くま|ねこ|猫|cat\b|がいこつ|ガイコツ|ドクロ|skull|家|城|house|castle|カップケーキ|cupcake|魔女|witch|rabbit|bear/i],
+  [1, /キャンディ|candy|あめ|飴|スティック|ロリポップ|lolli|こうもり|コウモリ|bat\b|くもの巣|クモの巣|蜘蛛|web|ライト|ランタン|lantern|月|moon|はっぱ|葉|leaf|クッキー|cookie|ぼうし|帽子|hat|ほうき|broom|ドーナツ|donut/i],
+];
+async function naturalArea(im) {
+  if (im.area) return im.area;
+  if (isSvg(im.file)) { const i = new Image(); i.src = im.url; await i.decode(); im.area = (i.naturalWidth || 300) * (i.naturalHeight || 300); }
+  else { const b = await createImageBitmap(im.file); im.area = b.width * b.height; b.close(); }
+  return im.area;
+}
+async function autoAssign() {
+  let target = images.filter(im => selected.has(im.id));
+  if (!target.length) target = images.filter(im => im.tier < 0);
+  if (!target.length) { $('status').textContent = '振り分ける画像がありません（未振り分けに画像を入れるか、画像を選択してください）'; return; }
+  const unknown = [], cnt = [0, 0, 0];
+  for (const im of target) {
+    const hit = KEYWORDS.find(([, re]) => re.test(im.name));
+    if (hit) { im.tier = hit[0]; cnt[hit[0]]++; } else unknown.push(im);
+  }
+  // 名前で分からないものは、名前で判定できた画像の大きさ(役割ごとの中央値)に一番近い役割へ。
+  // 基準がなければ 大きさ順に 上位30%=メイン / 中間40%=サブ / 下位30%=アクセント
+  for (const im of unknown) await naturalArea(im);
+  const known = [0, 1, 2].map(t => images.filter(m => !unknown.includes(m) && m.tier === t && m.area).map(m => Math.log(m.area)).sort((x, y) => x - y));
+  for (const t of [0, 1, 2]) for (const m of images) if (m.tier === t && !m.area && !unknown.includes(m) && target.includes(m)) { await naturalArea(m); known[t].push(Math.log(m.area)); known[t].sort((x, y) => x - y); }
+  const med = known.map(k => k.length ? k[k.length >> 1] : null);
+  if (med.some(v => v != null)) {
+    unknown.forEach(im => {
+      let best = 0, bd = 1e9;
+      med.forEach((v, t) => { if (v != null && Math.abs(Math.log(im.area) - v) < bd) { bd = Math.abs(Math.log(im.area) - v); best = t; } });
+      im.tier = best; cnt[best]++;
+    });
+  } else {
+    unknown.sort((x, y) => y.area - x.area).forEach((im, i) => {
+      const r = (i + 0.5) / unknown.length, t = r < 0.3 ? 0 : r < 0.7 ? 1 : 2;
+      im.tier = t; cnt[t]++;
+    });
+  }
+  selected.clear(); renderThumbs();
+  $('status').textContent = `自動振り分け: メイン${cnt[0]} / サブ${cnt[1]} / アクセント${cnt[2]}枚（名前で判定 ${target.length - unknown.length}、大きさで推測 ${unknown.length}）。違うものはドラッグか選択ボタンで直せます`;
+}
 
 // ---- 生成
 // SVG は createImageBitmap で直接読めないので、<img> 経由で十分大きく描画してから渡す
@@ -620,8 +669,8 @@ async function run(newSeed) {
       else if (m.type === 'error') finish('エラー: ' + m.message);
       else if (m.type === 'done') {
         show(m); $('seed').value = m.seed; saveSettings();
-        finish(m.bad === 0 ? `完了: ${m.count}個、重なりなし (seed ${m.seed}、${Math.round((Date.now() - t0) / 1000)}秒)${pool ? `。未振り分け${pool}枚は使っていません` : ''}`
-          : '重なりが残っています。「すき間」を増やすか、サイズ・使用回数を減らしてください');
+        finish(m.bad === 0 ? `完了: ${m.count}個、重なりなし (seed ${m.seed}、${Math.round((Date.now() - t0) / 1000)}秒)${m.shrink < 0.995 ? `。素材が多く重なるため、大きさを自動で${Math.round(m.shrink * 100)}%に縮小しました` : ''}${pool ? `。未振り分け${pool}枚は使っていません` : ''}`
+          : '重なりが残っています。素材が多すぎる可能性があります。基準サイズ・サイズ倍率を下げるか、使用回数を減らしてください');
       }
     };
     worker.onerror = e => finish('エラー: ' + (e.message || '不明なエラー'));
