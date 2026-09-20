@@ -66,6 +66,12 @@
 <main>
   <div>
     <div class="card">
+      <h2>プロジェクト</h2>
+      <div class="acts" style="margin-top:0"><button id="prjSave">ファイルに保存</button><button id="prjLoad">ファイルを読み込み</button><button id="prjClear">素材をすべてクリア</button></div>
+      <input type="file" id="prjFile" accept=".json,application/json" hidden>
+      <div id="autosave" style="font-size:11px;color:var(--sub);margin-top:6px">素材・振り分け・設定は、このブラウザに自動で保存されます。別のPCへ移す・バックアップにはファイル保存を使ってください。</div>
+    </div>
+    <div class="card">
       <h2>1. イラスト素材</h2>
       <p style="margin:0 0 8px;font-size:11px;color:var(--sub)">まとめて「未振り分け」に入れ、画像をクリックで選択（複数可）→ボタン、またはドラッグで役割へ振り分けます。</p>
       <div id="tiers"></div>
@@ -317,7 +323,7 @@ const TIERS = [
 ];
 let images = [];   // {name, file, url, tier}
 
-let nextId = 1;
+let nextId = 1, saveTimer = null, restored = false;
 const selected = new Set();   // 選択中の画像id
 const zoneId = t => 'th' + (t < 0 ? 'P' : t), cntId = t => 'cn' + (t < 0 ? 'P' : t);
 const wrap = $('tiers');
@@ -365,7 +371,7 @@ function buildZone(t) {
 function addFiles(files, tier) {
   [...files].filter(f => f.type.startsWith('image/') || isSvg(f)).forEach(f => {
     if (isSvg(f) && f.type !== 'image/svg+xml') f = new File([f], f.name, {type: 'image/svg+xml'});   // 種類が空でも SVG として読む
-    images.push({id: nextId++, name: f.name, file: f, url: URL.createObjectURL(f), tier});
+    pushImage(f.name, f, tier);
   });
   renderThumbs();
 }
@@ -394,6 +400,7 @@ function renderThumbs() {
     $(zoneId(im.tier)).appendChild(d);
   });
   $('selCount').textContent = selected.size;
+  scheduleSave();
 }
 
 // 設定値の表示と保存 (次回開いた時に復元)
@@ -413,6 +420,73 @@ document.querySelectorAll('.row input[type=range]').forEach(r => {
   r.addEventListener('input', () => { upd(); saveSettings(); }); upd();
 });
 ['seed', 'px'].forEach(k => $(k).addEventListener('change', saveSettings));
+
+// ---- 自動保存 (IndexedDB): 素材と振り分けを、次に開いた時に復元
+const idb = fn => new Promise((res, rej) => {
+  const r = indexedDB.open('scatter-tile', 1);
+  r.onupgradeneeded = () => r.result.createObjectStore('kv');
+  r.onerror = () => rej(r.error);
+  r.onsuccess = () => fn(r.result, res, rej);
+});
+const dbGet = k => idb((db, res, rej) => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+const dbSet = (k, v) => idb((db, res, rej) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, k); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); });
+function scheduleSave() {
+  if (!restored) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    try { await dbSet('images', images.map(({name, file, tier}) => ({name, file, tier}))); }
+    catch (e) { $('autosave').textContent = '自動保存できませんでした（ブラウザの設定・容量をご確認ください）。ファイル保存をご利用ください。'; }
+  }, 400);
+}
+function clearImages() { images.forEach(im => URL.revokeObjectURL(im.url)); images.length = 0; selected.clear(); }
+function pushImage(name, file, tier) { images.push({id: nextId++, name, file, url: URL.createObjectURL(file), tier}); }
+(async () => {
+  try {
+    const saved = await dbGet('images');
+    if (saved && saved.length) { saved.forEach(s => pushImage(s.name, s.file, s.tier)); renderThumbs(); $('status').textContent = `前回の素材 ${saved.length} 枚を復元しました`; }
+  } catch (e) {}
+  restored = true;
+})();
+
+// ---- ファイルで保存 / 読み込み (画像と設定を1つの .json にまとめる)
+const blobToDataUrl = blob => new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
+function dataUrlToBlob(u) {
+  const [head, b64] = u.split(','), bin = atob(b64), arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], {type: head.slice(5).split(';')[0]});
+}
+function applySettings(st) {
+  SAVED.forEach(k => { if (st[k] != null && $(k)) { $(k).value = st[k]; $(k).dispatchEvent(new Event('input')); } });
+  saveSettings();
+}
+$('prjSave').onclick = async () => {
+  if (!images.length) { $('status').textContent = '保存する素材がありません'; return; }
+  const settings = {}; SAVED.forEach(k => settings[k] = $(k).value);
+  const proj = {app: 'scatter-tile', version: 1, settings,
+    images: await Promise.all(images.map(async im => ({name: im.name, type: im.file.type, tier: im.tier, data: await blobToDataUrl(im.file)})))};
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(proj)], {type: 'application/json'}));
+  a.download = `scatter-project-${new Date().toISOString().slice(0, 10)}.json`; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  $('status').textContent = `プロジェクトを保存しました (素材${images.length}枚)`;
+};
+$('prjLoad').onclick = () => $('prjFile').click();
+$('prjFile').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try {
+    const p = JSON.parse(await f.text());
+    if (p.app !== 'scatter-tile' || !Array.isArray(p.images)) throw new Error('このアプリのプロジェクトファイルではありません');
+    if (images.length && !confirm('現在の素材を破棄して、プロジェクトを読み込みますか？')) return;
+    clearImages();
+    p.images.forEach(it => { const b = dataUrlToBlob(it.data); pushImage(it.name, new File([b], it.name, {type: it.type || b.type}), it.tier); });
+    applySettings(p.settings || {}); renderThumbs();
+    $('status').textContent = `プロジェクトを読み込みました (素材${images.length}枚)`;
+  } catch (err) { $('status').textContent = '読み込みエラー: ' + err.message; }
+};
+$('prjClear').onclick = () => {
+  if (!images.length || !confirm('素材をすべて消します。よろしいですか？（設定は残ります）')) return;
+  clearImages(); renderThumbs(); $('status').textContent = '素材をクリアしました';
+};
 
 // ---- 生成
 // SVG は createImageBitmap で直接読めないので、<img> 経由で十分大きく描画してから渡す
